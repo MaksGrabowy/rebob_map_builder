@@ -9,9 +9,12 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/filters/passthrough.h>
+#include <pcl/filters/statistical_outlier_removal.h>
 
 #include <grid_map_ros/grid_map_ros.hpp>
 #include <grid_map_msgs/msg/grid_map.hpp>
+
+#include <nav_msgs/msg/occupancy_grid.hpp>
 
 #include <chrono>
 #include <iomanip>
@@ -30,6 +33,10 @@ public:
 
         final_map.setGeometry(grid_map::Length(30.0, 30.0), 0.05, grid_map::Position(0.0, 0.0));
         final_map.add("elevation");
+        final_map.add("counts");
+        final_map.add("elevation_max");
+        final_map.add("elevation_min");
+        final_map.add("vertical_dispersion"); // Max minus Min
         final_map.setFrameId("odom");
 
         rclcpp::QoS qos_profile(10);
@@ -39,6 +46,7 @@ public:
 
         pub_map_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/dense_map", 1);
         pub_grid_ = this->create_publisher<grid_map_msgs::msg::GridMap>("/dense_grid", 1);
+        pub_costmap_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/grid_map_costmap", 1);
 
         save_srv_ = this->create_service<rebob_map_builder::srv::SavePCD>("save_dense_map", std::bind(&PointCloudAssembler::saveMapCallback, this, std::placeholders::_1, std::placeholders::_2));
 
@@ -48,7 +56,7 @@ public:
 private:
     void cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg){
         sensor_msgs::msg::PointCloud2 transformed_msg;
-        try 
+        try{
             geometry_msgs::msg::TransformStamped transform = tf_buffer_->lookupTransform("odom", msg->header.frame_id, msg->header.stamp, rclcpp::Duration::from_seconds(0.1));
             tf2::doTransform(*msg, transformed_msg, transform);
         }catch (const tf2::TransformException &ex){
@@ -60,17 +68,47 @@ private:
         *global_map_ += *current_cloud;
 
         pcl::PointCloud<pcl::PointXYZI>::Ptr cropped_cloud(new pcl::PointCloud<pcl::PointXYZI>());
+        pcl::PointCloud<pcl::PointXYZI>::Ptr clean_cloud(new pcl::PointCloud<pcl::PointXYZI>());
 
         pcl::PassThrough<pcl::PointXYZI> pass_filter;
         pass_filter.setInputCloud(current_cloud); // cloud transformed to odom frame
         pass_filter.setFilterFieldName("z");      // slice along the z axis
 
         // set the limits
-        pass_filter.setFilterLimits(-2.0, 1.5);   
+        pass_filter.setFilterLimits(-1.5, 1.5);   
 
         pass_filter.filter(*cropped_cloud);
 
-        for (const auto& point : cropped_cloud->points){
+        sor.setInputCloud(cropped_cloud);
+        sor.setMeanK(10);            // Look at the 10 nearest neighbors
+        sor.setStddevMulThresh(1.0); // If it's further than 1 standard deviation away, kill it
+        sor.filter(*clean_cloud);
+
+        final_map["counts"].setConstant(0.0);
+
+        for (const auto& point : clean_cloud->points){
+            grid_map::Position position(point.x, point.y);
+            if (!final_map.isInside(position)) continue;
+
+            float& max_z = final_map.atPosition("elevation_max", position);
+            float& min_z = final_map.atPosition("elevation_min", position);
+
+            // Update MAX Z
+            if (std::isnan(max_z) || point.z > max_z) {
+                max_z = point.z;
+            }
+            
+            // Update MIN Z
+            if (std::isnan(min_z) || point.z < min_z) {
+                min_z = point.z;
+            }
+
+            // Calculate your first condition: The Vertical Stack
+            // If Max and Min are far apart, it's a vertical obstacle!
+            float& dispersion = final_map.atPosition("vertical_dispersion", position);
+            dispersion = max_z - min_z;
+        }
+        for (const auto& point : clean_cloud->points){
             grid_map::Position position(point.x, point.y);
 
             if (!final_map.isInside(position)){
@@ -78,10 +116,16 @@ private:
             }
 
             float& cell_elevation = final_map.atPosition("elevation", position);
+            float& cell_count = final_map.atPosition("counts", position);
+            float& dispersion = final_map.atPosition("vertical_dispersion", position);
+            cell_count += 1;
 
             // update the cell
-            if (std::isnan(cell_elevation) || point.z > cell_elevation) 
-            {
+            // if (std::isnan(cell_elevation) || abs(point.z - cell_elevation) > 0.1 || cell_count > 5) 
+            // {
+            //     cell_elevation = point.z;
+            // }
+            if (std::isnan(cell_elevation) || point.z > cell_elevation){
                 cell_elevation = point.z;
             }
         }
@@ -92,6 +136,20 @@ private:
         voxel_filter.setLeafSize(0.05f, 0.05f, 0.05f);
         voxel_filter.filter(*filtered_map);
         global_map_ = filtered_map;
+
+        nav_msgs::msg::OccupancyGrid costmap_msg;
+
+        grid_map::GridMapRosConverter::toOccupancyGrid(
+            final_map,        // Your grid map object
+            "vertical_dispersion",   // The layer you want to export
+            0.0f,               // The value that should map to 0 (Free Space)
+            0.5f,               // The value that should map to 100 (Obstacle)
+            costmap_msg         // The message to populate
+        );
+
+        costmap_msg.header.frame_id = "odom";
+        costmap_msg.header.stamp = this->get_clock()->now();
+        pub_costmap_->publish(costmap_msg);
 
         sensor_msgs::msg::PointCloud2 map_msg;
         pcl::toROSMsg(*global_map_, map_msg);
@@ -140,9 +198,12 @@ private:
 
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_map_;
     rclcpp::Publisher<grid_map_msgs::msg::GridMap>::SharedPtr pub_grid_;
+    rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr pub_costmap_;
+    // pub_costmap_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/grid_map_costmap", 1);
 
     rclcpp::Service<rebob_map_builder::srv::SavePCD>::SharedPtr save_srv_;
     pcl::PointCloud<pcl::PointXYZI>::Ptr global_map_;
+    pcl::StatisticalOutlierRemoval<pcl::PointXYZI> sor;
     grid_map::GridMap final_map;
 };
 

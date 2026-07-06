@@ -14,6 +14,8 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_sensor_msgs REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(grid_map_core REQUIRED)
@@ -30,6 +32,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 )
 
 add_executable(build_map src/build_map.cpp)
+add_executable(lio_sam_odom src/lio_sam_odom.cpp)
+add_executable(navsat_tester src/navsat_tester.cpp)
 
 rosidl_target_interfaces(build_map ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
@@ -45,7 +49,44 @@ ament_target_dependencies(build_map
 )
 target_link_libraries(build_map ${PCL_LIBRARIES})
 
+rosidl_target_interfaces(lio_sam_odom ${PROJECT_NAME} "rosidl_typesupport_cpp")
+
+ament_target_dependencies(lio_sam_odom 
+  rclcpp 
+  sensor_msgs 
+  tf2_ros 
+  tf2_sensor_msgs 
+  pcl_conversions
+  grid_map_core
+  grid_map_ros
+  grid_map_msgs
+  tf2_geometry_msgs
+)
+target_link_libraries(lio_sam_odom ${PCL_LIBRARIES})
+
+rosidl_target_interfaces(navsat_tester ${PROJECT_NAME} "rosidl_typesupport_cpp")
+
+ament_target_dependencies(navsat_tester 
+  rclcpp 
+  sensor_msgs 
+  tf2_ros 
+  tf2_sensor_msgs 
+  pcl_conversions
+  geometry_msgs
+  grid_map_core
+  grid_map_ros
+  grid_map_msgs
+  tf2_geometry_msgs
+)
+target_link_libraries(navsat_tester ${PCL_LIBRARIES})
+
 install(TARGETS build_map
+  DESTINATION lib/${PROJECT_NAME})
+
+install(TARGETS lio_sam_odom
+  DESTINATION lib/${PROJECT_NAME})
+
+install(TARGETS navsat_tester
   DESTINATION lib/${PROJECT_NAME})
 
 ament_package()
