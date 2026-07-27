@@ -34,6 +34,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 add_executable(build_map src/build_map.cpp)
 add_executable(lio_sam_odom src/lio_sam_odom.cpp)
 add_executable(navsat_tester src/navsat_tester.cpp)
+add_executable(rebob_path_viz src/rebob_path_viz.cpp)
+add_executable(build_grid src/build_grid.cpp)
+add_executable(build_grid_outdoor src/build_grid_outdoor.cpp)
 
 rosidl_target_interfaces(build_map ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
@@ -78,7 +81,51 @@ ament_target_dependencies(navsat_tester
   grid_map_msgs
   tf2_geometry_msgs
 )
-target_link_libraries(navsat_tester ${PCL_LIBRARIES})
+target_link_libraries(rebob_path_viz ${PCL_LIBRARIES})
+
+rosidl_target_interfaces(rebob_path_viz ${PROJECT_NAME} "rosidl_typesupport_cpp")
+
+ament_target_dependencies(rebob_path_viz 
+  rclcpp 
+  sensor_msgs 
+  tf2_ros 
+  tf2_sensor_msgs 
+  pcl_conversions
+  geometry_msgs
+  grid_map_core
+  grid_map_ros
+  grid_map_msgs
+  tf2_geometry_msgs
+)
+target_link_libraries(rebob_path_viz ${PCL_LIBRARIES})
+
+rosidl_target_interfaces(build_grid ${PROJECT_NAME} "rosidl_typesupport_cpp")
+
+ament_target_dependencies(build_grid
+  rclcpp 
+  sensor_msgs 
+  tf2_ros 
+  tf2_sensor_msgs 
+  pcl_conversions
+  grid_map_core
+  grid_map_ros
+  grid_map_msgs
+)
+target_link_libraries(build_grid ${PCL_LIBRARIES})
+
+rosidl_target_interfaces(build_grid_outdoor ${PROJECT_NAME} "rosidl_typesupport_cpp")
+
+ament_target_dependencies(build_grid_outdoor
+  rclcpp 
+  sensor_msgs 
+  tf2_ros 
+  tf2_sensor_msgs 
+  pcl_conversions
+  grid_map_core
+  grid_map_ros
+  grid_map_msgs
+)
+target_link_libraries(build_grid_outdoor ${PCL_LIBRARIES})
 
 install(TARGETS build_map
   DESTINATION lib/${PROJECT_NAME})
@@ -87,6 +134,15 @@ install(TARGETS lio_sam_odom
   DESTINATION lib/${PROJECT_NAME})
 
 install(TARGETS navsat_tester
+  DESTINATION lib/${PROJECT_NAME})
+
+install(TARGETS rebob_path_viz
+  DESTINATION lib/${PROJECT_NAME})
+
+install(TARGETS build_grid
+  DESTINATION lib/${PROJECT_NAME})
+
+install(TARGETS build_grid_outdoor
   DESTINATION lib/${PROJECT_NAME})
 
 ament_package()
